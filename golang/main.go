@@ -3,12 +3,14 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"hash/crc64"
 	"io"
 	"math"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -29,20 +31,23 @@ type Task struct {
 }
 
 func main() {
-	noScreen := pflag.Bool("noscreen", false, "是否关闭screen模式")
-	pflag.Parse() // 解析命令行参数
+	var noScreen bool
+	var parallel int
+	pflag.BoolVarP(&noScreen, "noscreen", "s", false, "是否关闭screen模式")
+	pflag.IntVarP(&parallel, "parallel", "p", 10, "并发的协程数")
+	pflag.Parse()
 
 	positionalArgs := pflag.Args()
 	if len(positionalArgs) != 1 {
-		fmt.Println("必须指定ef2格式文件的名称，%v", positionalArgs)
+		fmt.Println("必须指定ef2文件名，", positionalArgs)
 		os.Exit(1)
 	}
 
 	ef2File := positionalArgs[0]
 
 	// 根据noScreen的值执行不同的逻辑
-	if *noScreen {
-		dowdownloadef2(ef2File)
+	if noScreen {
+		dowdownloadef2(ef2File, parallel)
 	} else {
 		pwd, _ := os.Getwd()
 		fmt.Printf("当前目录：%s, 下载文件：%s 已经后台screen执行，可screen -r进入查看下载进度\n", pwd, ef2File)
@@ -58,7 +63,7 @@ func main() {
 		}
 	}
 }
-func dowdownloadef2(ef2filename string) {
+func dowdownloadef2(ef2filename string, parallel int) {
 	infos, err := parseDownloadInfo(ef2filename)
 	if err != nil {
 		fmt.Println("File parsing error:", err)
@@ -71,7 +76,7 @@ func dowdownloadef2(ef2filename string) {
 		go func(i int, info downloadInfo) {
 			defer wg.Done()
 
-			downloadResource(info)
+			downloadResource(info, parallel)
 		}(i, *info)
 
 	}
@@ -107,40 +112,43 @@ func parseDownloadInfo(filePath string) ([]*downloadInfo, error) {
 	return infos, nil
 }
 
-func downloadResource(info downloadInfo) {
-	// 创建一个临时目录来保存分片
-	dir := "downloading"
-	err := os.Mkdir(dir, os.ModePerm)
-	if err != nil && !os.IsExist(err) {
-		fmt.Println("创建临时目录失败:", err)
-		return
-	}
-	//defer os.RemoveAll(dir) // 最后清理临时文件
-
-	filename, filesize, err := downloadHeader(info)
+func downloadResource(info downloadInfo, parallel int) {
+	filename, filesize, crc64, err := downloadHeader(info)
 	if err != nil {
 		fmt.Println("获取文件头信息失败:", err)
 		return
 	}
 
-	var numParts = 10
-	if filesize > 10*1024*1024*1024 {
-		numParts = int(filesize/1024*1024*1024) + 1
-	}
-	if filesize < 1024 {
-		numParts = 1
+	// 使用os.Stat获取文件信息
+	fileInfo, err := os.Stat(filename)
+	if err == nil && filesize == fileInfo.Size() {
+		fmt.Println("文件已经存在:", filename)
+		return
 	}
 
-	part_size := filesize / int64(numParts)
+	// 创建一个临时目录来保存分片
+	dir := filename + "downloading"
+	err = os.Mkdir(dir, os.ModePerm)
+	if err != nil && !os.IsExist(err) {
+		fmt.Println("创建临时目录失败:", err)
+		return
+	}
+
+	if filesize > 10*1024*1024*1024 {
+		parallel = int(filesize/1024*1024*1024) + 1
+	}
+	if filesize < 1024*1024 {
+		parallel = int(filesize/100*1024) + 1
+	}
+
+	part_size := (filesize-1)/int64(parallel) + 1
 
 	task_info := make(chan Task)
 	defer close(task_info)
 
-	partfilename := make([]string, numParts)
-	outfilename := dir + "/" + filename
-	// 分别下载每个分片
+	partfilename := make([]string, parallel)
 	var wg sync.WaitGroup
-	for i := 0; i < numParts; i++ {
+	for i := 0; i < parallel; i++ {
 		range_begin := int64(i) * part_size
 		range_end := int64(i+1)*part_size - 1
 		if range_end > filesize {
@@ -149,7 +157,7 @@ func downloadResource(info downloadInfo) {
 		wg.Add(1)
 		go func(index int, range_begin, range_end int64) {
 			defer wg.Done()
-			fullfileanme := outfilename + "." + strconv.FormatInt(range_begin, 10) + "-" + strconv.FormatInt(range_end, 10)
+			fullfileanme := dir + "/" + filename + "." + strconv.FormatInt(range_begin, 10) + "-" + strconv.FormatInt(range_end, 10)
 			partfilename[index] = fullfileanme
 			err := downloadPart(index, info, range_begin, range_end, fullfileanme, task_info)
 			if err != nil {
@@ -161,26 +169,28 @@ func downloadResource(info downloadInfo) {
 	}
 
 	tick := time.Tick(2 * time.Second)
-	arTasks := make([]Task, numParts)
+	arTasks := make([]Task, parallel)
 	for {
 		finish := 0
 		select {
 		case p := <-task_info:
 			arTasks[p.Index] = p
 		case <-tick:
-			var Percent = 0
+			var Percent = 0.0
 			var Speed = 0
 			for _, v := range arTasks {
 				if v.Percent >= 100 {
 					finish++
 				}
-				Percent += v.Percent
+				Percent += float64(v.Percent)
 				Speed += v.Speed
 			}
-			leftTime := calculateLeftTime(int64(Speed), filesize, filesize*int64(Percent)/100)
-			fmt.Printf("\r%s", filename+": "+strconv.Itoa(Percent/numParts)+"% "+humanSize(int64(Speed))+" "+leftTime)
+			Percent = Percent / float64(parallel)
+			leftTime := calculateLeftTime(int64(Speed), filesize, int64(float64(filesize)*Percent/100))
+			fmt.Printf("\r%s        ", filename+": "+strconv.FormatFloat(Percent, 'f', 2, 64)+"% "+humanSize(int64(Speed))+" "+leftTime)
 		}
-		if finish >= numParts {
+		if finish >= parallel {
+			fmt.Println("finish")
 			break
 		} else {
 		}
@@ -188,13 +198,18 @@ func downloadResource(info downloadInfo) {
 
 	wg.Wait()
 
-	mergedFiles(partfilename, outfilename)
+	err = mergedFiles(partfilename, filename, crc64)
+	if err == nil {
+		defer os.RemoveAll(dir)
+	} else {
+		fmt.Println("合并文件失败，err:", err)
+	}
 }
 
-func downloadHeader(info downloadInfo) (filename string, filesize int64, err error) {
+func downloadHeader(info downloadInfo) (filename string, filesize int64, crc64 uint64, err error) {
 	req, err := http.NewRequest("GET", info.Url, nil)
 	if err != nil {
-		return "", 0, err
+		return "", 0, 0, err
 	}
 	req.Header.Set("Range", "bytes=0-0")
 	for key, value := range info.Headers {
@@ -204,44 +219,47 @@ func downloadHeader(info downloadInfo) (filename string, filesize int64, err err
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", 0, err
+		return "", 0, 0, err
 	}
 	defer resp.Body.Close()
 
 	// 检查响应状态码，确保是成功或部分内容（206）
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
-		return "", 0, fmt.Errorf("请求文件名信息失败，状态码:%d,url:%s", resp.StatusCode, info.Url)
+		return "", 0, 0, fmt.Errorf("请求文件名文件大小等信息失败，状态码:%d,url:%s", resp.StatusCode, info.Url)
 	}
 
-	return parseFilenameFromDisposition(resp.Header.Get("Content-Disposition"), resp.Header.Get("Content-Range"))
-}
-
-func parseFilenameFromDisposition(disposition string, Content_Range string) (filename string, filesize int64, err error) {
 	re := regexp.MustCompile(`filename\*=UTF-8\'\'(.+)`)
-	match := re.FindStringSubmatch(disposition)
+	match := re.FindStringSubmatch(resp.Header.Get("Content-Disposition"))
 	if len(match) < 1 {
-		return "", 0, fmt.Errorf("如果没有找到filename参数")
+		parsedURL, err := url.Parse(info.Url)
+		if err != nil {
+			return "", 0, 0, fmt.Errorf("获取url文件名失败")
+		}
+		filename, err = url.QueryUnescape(filepath.Base(parsedURL.Path))
+		if err != nil {
+			return "", 0, 0, fmt.Errorf("Error decoding filename: %v", err)
+		}
+	} else {
+		filename, err = url.QueryUnescape(match[1])
+		if err != nil {
+			return "", 0, 0, fmt.Errorf("Error decoding filename: %v", err)
+		}
 	}
-
-	filename, err = url.QueryUnescape(match[1])
-	if err != nil {
-		return "", 0, fmt.Errorf("Error decoding filename: %v", err)
-	}
-
 	filename = sanitizeFilename(filename)
 
-	match = strings.Split(Content_Range, "/") //bytes 0-0/1256
+	match = strings.Split(resp.Header.Get("Content-Range"), "/") //bytes 0-0/1256
 	if len(match) != 2 {
-		return "", 0, fmt.Errorf("Content-Range格式错误:%v", Content_Range)
+		return "", 0, 0, fmt.Errorf("Content-Range格式错误:%v", resp.Header.Get("Content-Range"))
 	}
 
 	filesize, err = strconv.ParseInt(match[1], 10, 64)
 	if err != nil {
-		return "", 0, fmt.Errorf("解析文件大小错误 %v", match[2])
+		return "", 0, 0, fmt.Errorf("解析文件大小错误 %v", match[2])
 	}
 
-	return filename, filesize, nil
+	crc64, err = strconv.ParseUint(strings.TrimSpace(resp.Header.Get("x-oss-hash-crc64ecma")), 10, 64)
 
+	return filename, filesize, crc64, nil
 }
 
 func downloadPart(index int, info downloadInfo, range_begin int64, range_end int64, fullfilename string, p chan<- Task) error {
@@ -261,6 +279,17 @@ func downloadPart(index int, info downloadInfo, range_begin int64, range_end int
 		return err
 	}
 	filesize := fi.Size()
+
+	var task Task
+	task.Index = index
+	if filesize > (range_end - range_begin) {
+		fmt.Println(index, " 已经下载完成,filesize:", filesize, ",range_begin:", range_begin, ",range_end:", range_end)
+		task.Percent = 100
+		p <- task
+		return nil
+	} else {
+		fmt.Println(index, " 继续下载,filesize:", filesize, ",range_begin:", range_begin, ",range_end:", range_end)
+	}
 
 	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", filesize+range_begin, range_end))
 	for key, value := range info.Headers {
@@ -288,8 +317,6 @@ func downloadPart(index int, info downloadInfo, range_begin int64, range_end int
 	lasttime := time.Now().Unix()
 	time_interval := 1
 	last_receive := 0
-	var task Task
-	task.Index = index
 	written := 0
 	for {
 		nr, er := reader.Read(buff)
@@ -324,6 +351,10 @@ func downloadPart(index int, info downloadInfo, range_begin int64, range_end int
 			break
 		}
 	}
+
+	task.Percent = 100
+	p <- task
+
 	raw.Close()
 	writer.Flush()
 
@@ -341,7 +372,7 @@ func calculateLeftTime(speed int64, contentSize int64, downloadedSize int64) str
 	return duration.String()
 }
 
-func mergedFiles(files []string, outputFile string) error {
+func mergedFiles(files []string, outputFile string, crc64 uint64) error {
 	outFile, err := os.Create(outputFile)
 	if err != nil {
 		return fmt.Errorf("Error creating output file:%v", err)
@@ -353,8 +384,7 @@ func mergedFiles(files []string, outputFile string) error {
 		// 打开文件
 		inFile, err := os.Open(filename)
 		if err != nil {
-			fmt.Printf("Error opening file %s: %v\n", filename, err)
-			continue
+			return fmt.Errorf("Error opening file %s: %v\n", filename, err)
 		}
 		defer inFile.Close()
 
@@ -362,6 +392,17 @@ func mergedFiles(files []string, outputFile string) error {
 		_, err = io.Copy(outFile, inFile)
 		if err != nil {
 			return fmt.Errorf("Error writing to output file:%v", err)
+		}
+	}
+
+	if crc64 != 0 {
+		crc64check, err := crc64Checksum(outputFile)
+		if err != nil {
+			return err
+		}
+
+		if crc64check != crc64 {
+			return fmt.Errorf("crc64Checksum failed,crc64check:%v,crc64:%v", crc64check, crc64)
 		}
 	}
 
@@ -381,7 +422,7 @@ func humanSize(sizeBytes int64) string {
 	// 格式化到小数点后两位
 	s = math.Round(s*100) / 100
 
-	return fmt.Sprintf("%.2f %s", s, units[i])
+	return fmt.Sprintf("%.2f%s", s, units[i])
 }
 
 func sanitizeFilename(filename string) string {
@@ -394,4 +435,24 @@ func sanitizeFilename(filename string) string {
 	}
 
 	return filename
+}
+
+// 计算文件的CRC64校验和
+func crc64Checksum(filePath string) (uint64, error) {
+	// 打开文件
+	file, err := os.Open(filePath)
+	if err != nil {
+		return 0, err
+	}
+	defer file.Close()
+
+	hasher := crc64.New(crc64.MakeTable(crc64.ECMA))
+
+	// 读取文件内容并更新哈希
+	if _, err := io.Copy(hasher, file); err != nil {
+		return 0, err
+	}
+
+	// 获取最终的CRC64校验和
+	return hasher.Sum64(), nil
 }
