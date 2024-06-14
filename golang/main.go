@@ -134,10 +134,10 @@ func downloadResource(info downloadInfo, parallel int) {
 		return
 	}
 
-	if filesize > 10*1024*1024*1024 {
-		parallel = int(filesize/1024*1024*1024) + 1
+	if filesize > 10*1024*1024*1024 && parallel == 10 {
+		parallel = int(filesize/(1024*1024*1024)) + 1
 	}
-	if filesize < 1024*1024 {
+	if filesize < 1024*1024 && parallel == 10 {
 		parallel = int(filesize/100*1024) + 1
 	}
 
