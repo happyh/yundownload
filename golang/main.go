@@ -283,12 +283,12 @@ func downloadPart(index int, info downloadInfo, range_begin int64, range_end int
 	var task Task
 	task.Index = index
 	if filesize > (range_end - range_begin) {
-		fmt.Println(index, " 已经下载完成,filesize:", filesize, ",range_begin:", range_begin, ",range_end:", range_end)
+		fmt.Println(index, " 已经下载完成,filesize:", filesize, ",rangesize:", range_end-range_begin+1)
 		task.Percent = 100
 		p <- task
 		return nil
 	} else {
-		fmt.Println(index, " 继续下载,filesize:", filesize, ",range_begin:", range_begin, ",range_end:", range_end)
+		fmt.Println(index, " 继续下载,filesize:", filesize, ",rangesize:", range_end-range_begin+1)
 	}
 
 	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", filesize+range_begin, range_end))
