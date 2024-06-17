@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nightlyone/lockfile"
 	"github.com/spf13/pflag"
 )
 
@@ -44,11 +45,12 @@ func main() {
 	} else {
 		for _, ef2File := range positionalArgs {
 
+			pwd, _ := os.Getwd()
 			// 根据noScreen的值执行不同的逻辑
 			if noScreen {
+				fmt.Printf("当前目录：%s, 下载文件：%s \n", pwd, ef2File)
 				dowdownloadef2(ef2File, parallel)
 			} else {
-				pwd, _ := os.Getwd()
 				fmt.Printf("当前目录：%s, 下载文件：%s 已经后台screen执行，可screen -r进入查看下载进度\n", pwd, ef2File)
 
 				// 构造要执行的命令
@@ -121,15 +123,29 @@ func downloadResource(info downloadInfo, parallel int, all_task_count int) {
 		return
 	}
 
-	// 使用os.Stat获取文件信息
 	fileInfo, err := os.Stat(filename)
 	if err == nil && filesize == fileInfo.Size() {
 		fmt.Println("文件已经存在:", filename)
 		return
 	}
 
+	pwd, _ := os.Getwd()
+	// 创建一个新的锁文件实例
+	lf, err := lockfile.New(pwd + "/" + filename + ".lock")
+	if err != nil {
+		fmt.Printf("创建锁文件时出错: %v", err)
+		return
+	}
+
+	err = lf.TryLock()
+	if err = lf.TryLock(); err != nil {
+		fmt.Printf("Cannot lock %q, reason: %v", lf, err)
+		return
+	}
+	defer lf.Unlock()
+
 	// 创建一个临时目录来保存分片
-	dir := filename + "downloading"
+	dir := pwd + "/" + filename + "downloading"
 	err = os.Mkdir(dir, os.ModePerm)
 	if err != nil && !os.IsExist(err) {
 		fmt.Println("创建临时目录失败:", err)
@@ -200,7 +216,7 @@ func downloadResource(info downloadInfo, parallel int, all_task_count int) {
 
 	wg.Wait()
 
-	err = mergedFiles(partfilename, filename, crc64)
+	err = mergedFiles(partfilename, pwd+"/"+filename, crc64)
 	if err == nil {
 		defer os.RemoveAll(dir)
 	} else {
@@ -300,6 +316,7 @@ func downloadPart(index int, info downloadInfo, range_begin int64, range_end int
 
 	file, err := os.OpenFile(fullfilename, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
 	if err != nil {
+
 		return err
 	}
 	defer file.Close()
