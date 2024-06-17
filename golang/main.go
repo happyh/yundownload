@@ -138,7 +138,7 @@ func downloadResource(info downloadInfo, parallel int, all_task_count int) {
 		parallel = int(filesize/(1024*1024*1024)) + 1
 	}
 	if filesize < 1024*1024 && parallel == 10 {
-		parallel = int(filesize/100*1024) + 1
+		parallel = int(filesize/(100*1024)) + 1
 	}
 
 	part_size := (filesize-1)/int64(parallel) + 1
@@ -151,7 +151,7 @@ func downloadResource(info downloadInfo, parallel int, all_task_count int) {
 	for i := 0; i < parallel; i++ {
 		range_begin := int64(i) * part_size
 		range_end := int64(i+1)*part_size - 1
-		if range_end > filesize {
+		if range_end >= filesize {
 			range_end = filesize - 1
 		}
 		wg.Add(1)
