@@ -76,9 +76,9 @@ func dowdownloadef2(ef2filename string, parallel int) {
 		go func(i int, info downloadInfo) {
 			defer wg.Done()
 
-			downloadResource(info, parallel)
+			downloadResource(info, parallel, len(infos))
 		}(i, *info)
-
+		time.Sleep(2 * time.Second)
 	}
 	wg.Wait()
 }
@@ -112,7 +112,7 @@ func parseDownloadInfo(filePath string) ([]*downloadInfo, error) {
 	return infos, nil
 }
 
-func downloadResource(info downloadInfo, parallel int) {
+func downloadResource(info downloadInfo, parallel int, all_task_count int) {
 	filename, filesize, crc64, err := downloadHeader(info)
 	if err != nil {
 		fmt.Println("获取文件头信息失败:", err)
@@ -168,7 +168,7 @@ func downloadResource(info downloadInfo, parallel int) {
 		}(i, range_begin, range_end)
 	}
 
-	tick := time.Tick(2 * time.Second)
+	tick := time.Tick(time.Duration(all_task_count*2) * time.Second)
 	arTasks := make([]Task, parallel)
 	for {
 		finish := 0
