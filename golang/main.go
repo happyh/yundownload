@@ -38,29 +38,31 @@ func main() {
 	pflag.Parse()
 
 	positionalArgs := pflag.Args()
-	if len(positionalArgs) != 1 {
+	if len(positionalArgs) < 1 {
 		fmt.Println("必须指定ef2文件名，", positionalArgs)
 		os.Exit(1)
-	}
-
-	ef2File := positionalArgs[0]
-
-	// 根据noScreen的值执行不同的逻辑
-	if noScreen {
-		dowdownloadef2(ef2File, parallel)
 	} else {
-		pwd, _ := os.Getwd()
-		fmt.Printf("当前目录：%s, 下载文件：%s 已经后台screen执行，可screen -r进入查看下载进度\n", pwd, ef2File)
+		for _, ef2File := range positionalArgs {
 
-		// 构造要执行的命令
-		command := fmt.Sprintf("./%s %s --noscreen", os.Args[0], ef2File)
+			// 根据noScreen的值执行不同的逻辑
+			if noScreen {
+				dowdownloadef2(ef2File, parallel)
+			} else {
+				pwd, _ := os.Getwd()
+				fmt.Printf("当前目录：%s, 下载文件：%s 已经后台screen执行，可screen -r进入查看下载进度\n", pwd, ef2File)
 
-		// 使用screen执行命令
-		cmd := exec.Command("screen", "-dmS", "my_screen", "bash", "-c", command)
-		if err := cmd.Start(); err != nil {
-			fmt.Println("执行screen命令时出错:", err)
-			os.Exit(1)
+				// 构造要执行的命令
+				command := fmt.Sprintf("./%s %s --noscreen", os.Args[0], ef2File)
+
+				// 使用screen执行命令
+				cmd := exec.Command("screen", "-dmS", "my_screen", "bash", "-c", command)
+				if err := cmd.Start(); err != nil {
+					fmt.Println("执行screen命令时出错:", err)
+					os.Exit(1)
+				}
+			}
 		}
+
 	}
 }
 func dowdownloadef2(ef2filename string, parallel int) {
