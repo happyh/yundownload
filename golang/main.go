@@ -267,18 +267,11 @@ func downloadPart(index int, info downloadInfo, range_begin int64, range_end int
 	if err != nil {
 		return err
 	}
-
-	file, err := os.OpenFile(fullfilename, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
-	if err != nil {
-		return err
+	filesize := int64(0)
+	fileInfo, err := os.Stat(fullfilename)
+	if err == nil {
+		filesize = fileInfo.Size()
 	}
-	defer file.Close()
-
-	fi, err := file.Stat()
-	if err != nil {
-		return err
-	}
-	filesize := fi.Size()
 
 	var task Task
 	task.Index = index
@@ -303,6 +296,11 @@ func downloadPart(index int, info downloadInfo, range_begin int64, range_end int
 	}
 	defer resp.Body.Close()
 
+	file, err := os.OpenFile(fullfilename, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
 	// 检查响应状态码，确保是成功或部分内容（206）
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
 		return fmt.Errorf("请求分片失败，状态码：%d", resp.StatusCode)
