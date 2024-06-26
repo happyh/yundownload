@@ -29,6 +29,7 @@ type Task struct {
 	Index   int
 	Percent int
 	Speed   int
+	Err     error
 }
 
 func main() {
@@ -201,6 +202,7 @@ func downloadResource(info downloadInfo, parallel int, all_task_count int) {
 
 	tick := time.Tick(time.Duration(all_task_count*2) * time.Second)
 	arTasks := make([]Task, parallel)
+	isError := false
 	for {
 		finish := 0
 		select {
@@ -212,6 +214,9 @@ func downloadResource(info downloadInfo, parallel int, all_task_count int) {
 			for _, v := range arTasks {
 				if v.Percent >= 100 {
 					finish++
+				}
+				if v.Err != nil {
+					isError = true
 				}
 				Percent += float64(v.Percent)
 				Speed += v.Speed
@@ -229,11 +234,13 @@ func downloadResource(info downloadInfo, parallel int, all_task_count int) {
 
 	wg.Wait()
 
-	err = mergedFiles(partfilename, pwd+"/"+filename, crc64)
-	if err == nil {
-		defer os.RemoveAll(dir)
-	} else {
-		fmt.Println("合并文件失败，err:", err)
+	if !isError {
+		err = mergedFiles(partfilename, pwd+"/"+filename, crc64)
+		if err == nil {
+			defer os.RemoveAll(dir)
+		} else {
+			fmt.Println("合并文件失败，err:", err)
+		}
 	}
 }
 
@@ -306,6 +313,8 @@ func downloadPart(index int, info downloadInfo, range_begin int64, range_end int
 
 	var task Task
 	task.Index = index
+	task.Err = nil
+	task.Speed = 0
 	if filesize > (range_end - range_begin) {
 		fmt.Println(index, " 已经下载完成,filesize:", filesize, ",rangesize:", range_end-range_begin+1)
 		task.Percent = 100
@@ -383,6 +392,8 @@ func downloadPart(index int, info downloadInfo, range_begin int64, range_end int
 	}
 
 	task.Percent = 100
+	task.Speed = 0
+	task.Err = err
 	p <- task
 
 	raw.Close()
