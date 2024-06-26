@@ -141,6 +141,8 @@ func downloadResource(info downloadInfo, parallel int, all_task_count int) {
 	if err == nil && filesize == fileInfo.Size() {
 		fmt.Println("文件已经存在:", filename)
 		return
+	} else if err == nil && filesize != fileInfo.Size() {
+		fmt.Println("文件已经存在:", filename, ",但是文件大小不对，重新下载")
 	}
 
 	pwd, _ := os.Getwd()
