@@ -98,7 +98,7 @@ func parseDownloadInfo(filePath string) ([]*downloadInfo, error) {
 	if strings.HasPrefix(lowerFilePath, "http://") || strings.HasPrefix(lowerFilePath, "https://") {
 		info := &downloadInfo{
 			Url:     strings.TrimSpace(filePath),
-			Headers: map[string]string{"referer": "", "User-Agent": ""},
+			Headers: map[string]string{"User-Agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/53.0.2763.0 Safari/537.36"},
 		}
 		infos = append(infos, info)
 		return infos, nil
