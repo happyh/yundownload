@@ -90,32 +90,30 @@ func dowdownloadef2(ef2filename string, parallel int) {
 }
 
 func parseDownloadInfo(filePath string) ([]*downloadInfo, error) {
-	if strings.HasPrefix(filePath, "http://") || strings.HasPrefix(filePath, "https://") {
-		infos := make([]*downloadInfo, 0, 1)
+	var infos []*downloadInfo
 
+	// Check if the filePath is a URL.
+	lowerFilePath := strings.ToLower(filePath)
+	if strings.HasPrefix(lowerFilePath, "http://") || strings.HasPrefix(lowerFilePath, "https://") {
 		info := &downloadInfo{
-			Url: strings.TrimSpace(filePath),
-			Headers: map[string]string{
-				"referer":    "",
-				"User-Agent": "",
-			},
+			Url:     strings.TrimSpace(filePath),
+			Headers: map[string]string{"referer": "", "User-Agent": ""},
 		}
 		infos = append(infos, info)
 		return infos, nil
 	}
+
 	contentBytes, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, err
 	}
 
-	content := strings.ReplaceAll(string(contentBytes), "\r\n", "\n")
+	content := string(contentBytes)
 
-	regexPattern := `<\n(.*?)\nreferer: (.*?)\nUser-Agent: (.*?)\n>`
-	compiledRegex := regexp.MustCompile(regexPattern)
+	regexPattern := `<\r?\n(.*?)\r?\nreferer: (.*?)\r?\nuser-agent: (.*?)\r?\n>`
+	compiledRegex := regexp.MustCompile(`(?i)` + regexPattern)
 
 	matches := compiledRegex.FindAllStringSubmatch(content, -1)
-
-	infos := make([]*downloadInfo, 0, len(matches))
 
 	for _, match := range matches {
 		info := &downloadInfo{
