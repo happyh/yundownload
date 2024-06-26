@@ -54,13 +54,15 @@ func main() {
 				fmt.Printf("当前目录：%s, 下载文件：%s 已经后台screen执行，可screen -r进入查看下载进度\n", pwd, ef2File)
 
 				// 构造要执行的命令
-				command := fmt.Sprintf("./%s %s --noscreen", os.Args[0], ef2File)
+				command := fmt.Sprintf("%s %s --noscreen", os.Args[0], ef2File)
 
 				// 使用screen执行命令
 				cmd := exec.Command("screen", "-dmS", "my_screen", "bash", "-c", command)
 				if err := cmd.Start(); err != nil {
 					fmt.Println("执行screen命令时出错:", err)
 					os.Exit(1)
+				} else {
+					fmt.Println("执行screen命令是 %v:", cmd)
 				}
 			}
 		}
@@ -88,6 +90,19 @@ func dowdownloadef2(ef2filename string, parallel int) {
 }
 
 func parseDownloadInfo(filePath string) ([]*downloadInfo, error) {
+	if strings.HasPrefix(filePath, "http://") || strings.HasPrefix(filePath, "https://") {
+		infos := make([]*downloadInfo, 0, 1)
+
+		info := &downloadInfo{
+			Url: strings.TrimSpace(filePath),
+			Headers: map[string]string{
+				"referer":    "",
+				"User-Agent": "",
+			},
+		}
+		infos = append(infos, info)
+		return infos, nil
+	}
 	contentBytes, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, err
