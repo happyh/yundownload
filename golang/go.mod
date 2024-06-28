@@ -1,4 +1,4 @@
-module aliyundownload
+module download
 
 go 1.17
 
