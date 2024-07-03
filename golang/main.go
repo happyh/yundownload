@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -38,6 +39,11 @@ func main() {
 	pflag.BoolVarP(&noScreen, "noscreen", "s", false, "是否关闭screen模式")
 	pflag.IntVarP(&parallel, "parallel", "p", 10, "并发的协程数")
 	pflag.Parse()
+
+	switch runtime.GOOS {
+	case "windows":
+		noScreen = true
+	}
 
 	positionalArgs := pflag.Args()
 	if len(positionalArgs) < 1 {
