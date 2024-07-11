@@ -61,7 +61,7 @@ func main() {
 				fmt.Printf("当前目录：%s, 下载文件：%s 已经后台screen执行，可screen -r进入查看下载进度\n", pwd, ef2File)
 
 				// 构造要执行的命令
-				command := fmt.Sprintf("%s %s --noscreen -p %d", os.Args[0], ef2File,parallel)
+				command := fmt.Sprintf("%s %s --noscreen -p %d", os.Args[0], ef2File, parallel)
 
 				// 使用screen执行命令
 				cmd := exec.Command("screen", "-dmS", "my_screen", "bash", "-c", command)
@@ -69,7 +69,7 @@ func main() {
 					fmt.Println("执行screen命令时出错:", err)
 					os.Exit(1)
 				} else {
-					fmt.Println("执行screen命令是 %v:", cmd)
+					fmt.Println("执行screen命令是:", cmd)
 				}
 			}
 		}
