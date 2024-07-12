@@ -47,7 +47,7 @@ func main() {
 		noScreen = true
 	}
 
-	logfilename := os.Args[0] + ".log"
+	logfilename := "download.log"
 	log.Init(logfilename, 3)
 
 	positionalArgs := pflag.Args()
