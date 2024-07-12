@@ -7,11 +7,13 @@ use std::process::Command;
 use std::convert::TryInto;
 use reqwest::header::{HeaderMap,HeaderValue,HeaderName,InvalidHeaderValue};
 use reqwest::blocking::{Client, ClientBuilder, Response};
+use reqwest::Url;
+use std::error::Error as OtherError;
+use percent_encoding::{percent_decode_str};
 
 use std::sync::mpsc::{channel, Sender, Receiver};
-use std::sync::mpsc;
 
-use std::sync::{Arc, Barrier,Mutex,RwLock};
+use std::sync::{Arc, Barrier,RwLock};
 use std::thread;
 use std::time::{Instant,Duration, SystemTime, UNIX_EPOCH};
 use std::error::Error;
@@ -40,25 +42,17 @@ fn download_ef2(ef2_filename: &str, parallel: usize) {
             return;
         }
     };
-
-    let barrier = Arc::new(Barrier::new(infos.len()));
     let infos_len = infos.len();
-    for (_i, info) in infos.into_iter().enumerate() {
-        let barrier = Arc::clone(&barrier);
-
+    let handles: Vec<_> = infos.into_iter().enumerate().map(|(i, info)| {
         thread::spawn(move || {
-            match download_resource(&info, parallel, infos_len) {
-                Ok(()) => (),
-                Err(e) => println!("Download resource error: {}", e),
+            if let Err(e) = download_resource(&info, parallel, infos_len) {
+                println!("Download resource error: {}", e);
             }
-
-            barrier.wait();
-        });
-
-        thread::sleep(Duration::from_secs(2));
+        })
+    }).collect();
+    for handle in handles {
+        handle.join().unwrap(); // 注意：如果子线程中发生panic，这里会重新panic
     }
-
-    barrier.wait();
 }
 
 #[derive(Debug)]
@@ -103,7 +97,32 @@ impl From<Box<dyn Error + Send + Sync + 'static>> for CustomError {
     }
 }
 
-fn parse_download_info(file_path: &str) -> Result<Vec<DownloadInfo>, CustomError> {
+fn parse_download_info_single(lines_buffer: &[String], re_referer: &Regex, re_user_agent: &Regex) -> Result<Option<DownloadInfo>, Box<dyn std::error::Error>> {
+    let url = lines_buffer[0].to_string();
+    let referer_match = re_referer.captures(&lines_buffer[1])
+        .and_then(|caps| caps.get(1))
+        .ok_or("无法获取Referer")?;
+    let referer = referer_match.as_str().trim().to_string();
+
+    let user_agent_match = re_user_agent.captures(&lines_buffer[2])
+        .and_then(|caps| caps.get(1))
+        .ok_or("无法获取User-Agent")?;
+    let user_agent = user_agent_match.as_str().trim().to_string();
+
+    let referer_header_name = HeaderName::from_static("referer");
+    let user_agent_header_name = HeaderName::from_static("user-agent");
+
+    let referer_header_value = HeaderValue::from_str(&referer)?;
+    let user_agent_header_value = HeaderValue::from_str(&user_agent)?;
+
+    let mut header_map = HeaderMap::new();
+    header_map.insert(referer_header_name, referer_header_value);
+    header_map.insert(user_agent_header_name, user_agent_header_value);
+
+    Ok(Some(DownloadInfo::new(url, header_map)))
+}
+
+fn parse_download_info(file_path: &str) -> Result<Vec<DownloadInfo>, Box<dyn std::error::Error>> {
     let lower_file_path = file_path.to_lowercase();
     if lower_file_path.starts_with("http://") || lower_file_path.starts_with("https://") {
         let mut header_map = HeaderMap::new();
@@ -117,34 +136,37 @@ fn parse_download_info(file_path: &str) -> Result<Vec<DownloadInfo>, CustomError
 
     let file = File::open(file_path)?;
     let reader = BufReader::new(file);
-    let content = reader.lines().fold(String::new(), |acc, line| acc + &line.unwrap() + "\n");
 
-    let regex_pattern = r"<\r?\n(.*?)\r?\nreferer: (.*?)\r?\nuser-agent: (.*?)\r?\n>";
-    let regex = Regex::new(regex_pattern).unwrap();
+    let mut infos = Vec::new();
+    let mut lines_buffer = Vec::new();
+    let mut collecting = false;
 
-    let captures = regex.captures_iter(&content);
+    let re_referer = Regex::new(r"referer: (.*)")?;
+    let re_user_agent = Regex::new(r"User-Agent: (.*)")?;
+    for line_result in reader.lines() {
+        let line = line_result?;
+        let line = line.trim();
+        if line.starts_with('<') {
+            collecting = true;
+            lines_buffer.clear();
+        } else if line.starts_with('>') {
+            collecting = false;
+            if lines_buffer.len() >= 3 {
+                match parse_download_info_single(&lines_buffer, &re_referer, &re_user_agent) {
+                    Ok(Some(download_info)) => infos.push(download_info),
+                    Ok(None) => (),
+                    Err(e) => eprintln!("Error parsing download info: {}", e),
+                }
+            }
 
-    let infos = captures.map(|cap| {
-        let url = cap.get(1).unwrap().as_str().trim();
-        let referer = cap.get(2).unwrap().as_str().trim();
-        let user_agent = cap.get(3).unwrap().as_str().trim();
-
-        let referer_header_name = HeaderName::from_static("referer");
-        let user_agent_header_name = HeaderName::from_static("User-Agent");
-
-        let referer_header_value = HeaderValue::from_str(referer).map_err(|e| CustomError::from(e))?;
-        let user_agent_header_value = HeaderValue::from_str(user_agent).map_err(|e| CustomError::from(e))?;
-
-        let mut header_map = HeaderMap::new();
-        header_map.insert(referer_header_name, referer_header_value);
-        header_map.insert(user_agent_header_name, user_agent_header_value);
-
-        Ok::<_, CustomError>(DownloadInfo::new(url.to_string(), header_map))
-    }).collect::<Result<Vec<_>, CustomError>>()?;
+            lines_buffer.clear();
+        } else if collecting {
+            lines_buffer.push(line.to_string());
+        }
+    }
 
     Ok(infos)
 }
-
 
 fn main() {
     let matches = App::new("ef2_downloader")
@@ -170,12 +192,17 @@ fn main() {
                 .help("EF2 files to download")
                 .required(true)
                 .multiple(true)
+                .allow_invalid_utf8(true)
         )
         .get_matches();
 
     let no_screen = matches.is_present("noscreen");
     let parallel = matches.value_of("parallel").unwrap().parse::<u32>().unwrap();
-    let ef2_files = matches.values_of_os("ef2_files").unwrap().collect::<Vec<_>>();
+    let ef2_files: Vec<String> = matches
+        .values_of_os("ef2_files")
+        .unwrap()
+        .map(|os_str| os_str.to_string_lossy().into_owned())
+        .collect();
 
     if ef2_files.is_empty() {
         eprintln!("Must specify EF2 file names");
@@ -184,7 +211,7 @@ fn main() {
 
     for ef2_file in ef2_files {
         let pwd = env::current_dir().unwrap().display().to_string();
-        let ef2_filename = ef2_file.to_str().unwrap_or_else(|| panic!("Path is not valid UTF-8"));
+        let ef2_filename = ef2_file;
         if no_screen {
             println!("Current directory: {:?}, download file: {:?}", pwd, ef2_filename);
             download_ef2(&ef2_filename, parallel.try_into().unwrap());
@@ -210,7 +237,7 @@ fn main() {
 fn download_resource(info: &DownloadInfo,mut parallel: usize, all_task_count: usize) -> Result<(),CustomError> {
     let (filename, filesize, crc64) = download_header(info)?;
     let filesize = filesize as u64;
-    let mut file_info = fs::metadata(&filename).ok();
+    let file_info = fs::metadata(&filename).ok();
     if let Some(fi) = file_info.as_ref() {
         if fi.len() == filesize {
             println!("文件已经存在: {}", filename);
@@ -221,14 +248,6 @@ fn download_resource(info: &DownloadInfo,mut parallel: usize, all_task_count: us
     }
 
     let pwd = env::current_dir().unwrap();
-    let lock_file_name = pwd.join(format!("{}.lock", filename));
-    let lock_file = Arc::new(RwLock::new(None::<std::fs::File>));
-
-    {
-        let mut lock = lock_file.write().unwrap();
-        *lock = Some(std::fs::OpenOptions::new().create(true).open(&lock_file_name)?);
-    }
-
     let temp_dir = pwd.join(format!("{}downloading", filename));
     fs::create_dir_all(&temp_dir)?;
 
@@ -257,7 +276,6 @@ fn download_resource(info: &DownloadInfo,mut parallel: usize, all_task_count: us
 
         let info = info.clone();
         let tx = tx.clone();
-        let lock_file = lock_file.clone();
         let handle = thread::spawn(move || {
             let result = download_part(i, info, range_begin.try_into().unwrap(), range_end.try_into().unwrap(), &full_filename, tx);
         });
@@ -270,6 +288,7 @@ fn download_resource(info: &DownloadInfo,mut parallel: usize, all_task_count: us
     let mut is_error = false;
     let mut finish = 0;
     while let Ok(task) = rx.recv() {
+        ar_tasks[task.index] = task.clone();
         if !task.errstring.is_empty(){
             is_error = true;
         }
@@ -289,9 +308,8 @@ fn download_resource(info: &DownloadInfo,mut parallel: usize, all_task_count: us
                 speed_sum += task.speed;
             }
             let percent_avg = percent_sum as f64 / parallel as f64;
-            let speed_avg = speed_sum as f64 / parallel as f64;
-            let left_time = calculate_left_time(speed_avg as i64, filesize.try_into().unwrap(), (percent_avg * filesize as f64 / 100.0) as i64);
-            println!("\r{}: {:.2}% {} {}", filename, percent_avg, human_size(speed_avg as i64), left_time);
+            let left_time = calculate_left_time(speed_sum, filesize.try_into().unwrap(), (percent_avg * filesize as f64 / 100.0) as i64);
+            println!("\r{}: {:.2}% {} {}", filename, percent_avg, human_size(speed_sum), left_time);
         }
     }
 
@@ -312,23 +330,20 @@ fn download_resource(info: &DownloadInfo,mut parallel: usize, all_task_count: us
     Ok(())
 }
 
-use reqwest::Url;
-use std::error::Error as OtherError;
-use percent_encoding::{percent_decode_str};
-
 fn download_header(info: &DownloadInfo) -> Result<(String, i64, u64), Box<dyn OtherError>> {
-    let headers = info.Headers.iter().fold(HeaderMap::new(), |mut acc, (k, v)| {
+    let mut headers = info.Headers.iter().fold(HeaderMap::new(), |mut acc, (k, v)| {
         acc.append(k.clone(), v.clone());
         acc
     });
+    headers.insert("Range", HeaderValue::from_static("bytes=0-0"));
     let client = Client::new();
     let response = client
         .get(&info.Url)
-        .header("Range", HeaderValue::from_static("bytes=0-0"))
         .headers(headers)
         .send()?;
 
     if !response.status().is_success() && response.status() != reqwest::StatusCode::PARTIAL_CONTENT {
+        println!("{}",info.Url);
         return Err(format!("请求文件名文件大小等信息失败，状态码:{},url:{}", response.status(), info.Url).into());
     }
 
@@ -360,17 +375,15 @@ fn download_header(info: &DownloadInfo) -> Result<(String, i64, u64), Box<dyn Ot
             .into_owned()
     };
 
-
     let filename = sanitize_filename(filename);
 
     let content_range = response.headers().get("content-range").and_then(|h| h.to_str().ok());
-    let (start, end, total) = if let Some(content_range) = content_range {
+    let total = if let Some(content_range) = content_range {
         let parts: Vec<&str> = content_range.split('/').collect();
         if parts.len() != 2 {
             return Err("Content-Range格式错误".into());
         }
-        let total = parts[1].parse::<i64>()?;
-        (parts[0].split('-').collect::<Vec<&str>>()[0].parse::<i64>()?, parts[0].split('-').collect::<Vec<&str>>()[1].parse::<i64>()?, total)
+        parts[1].parse::<i64>()?
     } else {
         return Err("Content-Range header not found".into());
     };
@@ -383,7 +396,7 @@ fn download_header(info: &DownloadInfo) -> Result<(String, i64, u64), Box<dyn Ot
         .and_then(|h| h.to_str().ok())
         .map(|s| s.trim())
         .and_then(|s| s.parse::<u64>().ok())
-        .ok_or("无法解析CRC64")?;
+        .unwrap_or(0);
 
     Ok((filename, filesize, crc64))
 }
@@ -414,17 +427,11 @@ fn download_part(
     fullfilename: &str,
     p: Sender<Task>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let client = Client::new();
-    let req = client.get(info.Url.trim())
-        .header("Range", format!("bytes={}-{}", range_begin, range_end))
-        .headers(info.Headers)
-        .build()?;
-
     let filesize = match std::fs::metadata(fullfilename) {
         Ok(metadata) => metadata.len(),
         Err(_) => 0,
     };
-
+    let filesize = filesize as i64;
     let mut task = Task {
         index,
         errstring: "".to_string(),
@@ -432,7 +439,7 @@ fn download_part(
         percent: 0,
     };
 
-    if filesize > (range_end - range_begin) as u64 {
+    if filesize > (range_end - range_begin) {
         println!("{} 已经下载完成, filesize: {}, rangesize: {}", index, filesize, range_end - range_begin + 1);
         task.percent = 100;
         p.send(task).unwrap();
@@ -441,10 +448,15 @@ fn download_part(
         println!("{} 继续下载, filesize: {}, rangesize: {}", index, filesize, range_end - range_begin + 1);
     }
 
-    // 发送请求
+    let client = Client::new();
+    let req = client.get(info.Url.trim())
+        .header("Range", format!("bytes={}-{}", filesize+range_begin, range_end))
+        .headers(info.Headers)
+        .build()?;
+
     let mut resp = client.execute(req)?;
     if resp.status().is_success() || resp.status().as_u16() == 206 {
-        let content_length = resp.content_length().unwrap();
+        let content_length = resp.content_length().unwrap() as i64;
         let mut file = OpenOptions::new().create(true).append(true).open(fullfilename)?;
         let mut buffer = vec![0; 10 * 1024];
         let mut writer = BufWriter::new(&mut file);
@@ -464,7 +476,7 @@ fn download_part(
                     let new_task = Task {
                         index,
                         errstring: "".to_string(),
-                        percent: ((written as u64 + filesize) * 100 / (content_length + filesize)) as i32,
+                        percent: ((written as i64 + filesize) * 100 / (content_length + filesize)) as i32,
                         speed: last_receive as i64 / (current_time - last_time),
                     };
 
@@ -499,7 +511,21 @@ fn calculate_left_time(speed: i64, content_size: i64, downloaded_size: i64) -> S
     let remaining_seconds = (remaining_bytes as f64) / (speed as f64);
     let duration = Duration::from_secs(remaining_seconds as u64);
 
-    format!("{:?}", duration)
+    let hours = duration.as_secs() / 3600;
+    let minutes = (duration.as_secs() % 3600) / 60;
+    let seconds = duration.as_secs() % 60;
+
+    let mut time_str = String::new();
+
+    if hours > 0 {
+        time_str.push_str(&format!("{}h", hours));
+    }
+    if minutes > 0 || !time_str.is_empty() {
+        time_str.push_str(&format!("{}m", minutes));
+    }
+    time_str.push_str(&format!("{}s", seconds));
+
+    time_str
 }
 
 /// 合并文件
@@ -532,7 +558,7 @@ fn human_size(size_bytes: i64) -> String {
     let i = ((size_bytes as f64).log(unit as f64)).floor() as usize;
     let p = unit.pow(i as u32);
     let s = (size_bytes as f64) / (p as f64);
-    format!("{:.2}{}", s.round() / 100.0, units[i])
+    format!("{:.2}{}", s.round(), units[i])
 }
 
 use crc64fast::Digest;

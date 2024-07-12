@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	log "github.com/happyh/go-logging"
 	"github.com/nightlyone/lockfile"
 	"github.com/spf13/pflag"
 )
@@ -34,6 +35,7 @@ type Task struct {
 }
 
 func main() {
+	//使用cobra进行解析？
 	var noScreen bool
 	var parallel int
 	pflag.BoolVarP(&noScreen, "noscreen", "s", false, "是否关闭screen模式")
@@ -45,9 +47,12 @@ func main() {
 		noScreen = true
 	}
 
+	logfilename := os.Args[0] + ".log"
+	log.Init(logfilename, 3)
+
 	positionalArgs := pflag.Args()
 	if len(positionalArgs) < 1 {
-		fmt.Println("必须指定ef2文件名，", positionalArgs)
+		log.Log().Error("必须指定ef2文件名，", positionalArgs)
 		os.Exit(1)
 	} else {
 		for _, ef2File := range positionalArgs {
@@ -55,10 +60,10 @@ func main() {
 			pwd, _ := os.Getwd()
 			// 根据noScreen的值执行不同的逻辑
 			if noScreen {
-				fmt.Printf("当前目录：%s, 下载文件：%s \n", pwd, ef2File)
+				log.Log().Infof("当前目录：%s, 下载文件：%s \n", pwd, ef2File)
 				dowdownloadef2(ef2File, parallel)
 			} else {
-				fmt.Printf("当前目录：%s, 下载文件：%s 已经后台screen执行，可screen -r进入查看下载进度\n", pwd, ef2File)
+				log.Log().Infof("当前目录：%s, 下载文件：%s 已经后台screen执行，可screen -r进入查看下载进度\n", pwd, ef2File)
 
 				// 构造要执行的命令
 				command := fmt.Sprintf("%s %s --noscreen -p %d", os.Args[0], ef2File, parallel)
@@ -66,10 +71,10 @@ func main() {
 				// 使用screen执行命令
 				cmd := exec.Command("screen", "-dmS", "my_screen", "bash", "-c", command)
 				if err := cmd.Start(); err != nil {
-					fmt.Println("执行screen命令时出错:", err)
+					log.Log().Error("执行screen命令时出错:", err)
 					os.Exit(1)
 				} else {
-					fmt.Println("执行screen命令是:", cmd)
+					log.Log().Info("执行screen命令是:", cmd)
 				}
 			}
 		}
@@ -79,7 +84,7 @@ func main() {
 func dowdownloadef2(ef2filename string, parallel int) {
 	infos, err := parseDownloadInfo(ef2filename)
 	if err != nil {
-		fmt.Println("File parsing error:", err)
+		log.Log().Error("File parsing error:", err)
 		return
 	}
 
@@ -139,38 +144,38 @@ func parseDownloadInfo(filePath string) ([]*downloadInfo, error) {
 func downloadResource(info downloadInfo, parallel int, all_task_count int) {
 	filename, filesize, crc64, err := downloadHeader(info)
 	if err != nil {
-		fmt.Println("获取文件头信息失败:", err)
+		log.Log().Error("获取文件头信息失败:", err)
 		return
 	}
 
 	fileInfo, err := os.Stat(filename)
 	if err == nil && filesize == fileInfo.Size() {
-		fmt.Println("文件已经存在:", filename)
+		log.Log().Info("文件已经存在:", filename)
 		return
 	} else if err == nil && filesize != fileInfo.Size() {
-		fmt.Println("文件已经存在:", filename, ",但是文件大小不对，重新下载")
+		log.Log().Info("文件已经存在:", filename, ",但是文件大小不对，重新下载")
 	}
 
 	pwd, _ := os.Getwd()
 	// 创建一个新的锁文件实例
 	lf, err := lockfile.New(pwd + "/" + filename + ".lock")
 	if err != nil {
-		fmt.Printf("创建锁文件时出错: %v", err)
+		log.Log().Errorf("创建锁文件时出错: %v", err)
 		return
 	}
 
 	err = lf.TryLock()
 	if err = lf.TryLock(); err != nil {
-		fmt.Printf("Cannot lock %q, reason: %v", lf, err)
+		log.Log().Errorf("Cannot lock %q, reason: %v", lf, err)
 		return
 	}
 	defer lf.Unlock()
 
 	// 创建一个临时目录来保存分片
-	dir := pwd + "/" + filename + "downloading"
-	err = os.Mkdir(dir, os.ModePerm)
+	tmpdir := pwd + "/" + filename + "downloading"
+	err = os.Mkdir(tmpdir, os.ModePerm)
 	if err != nil && !os.IsExist(err) {
-		fmt.Println("创建临时目录失败:", err)
+		log.Log().Error("创建临时目录失败:", err)
 		return
 	}
 
@@ -197,13 +202,13 @@ func downloadResource(info downloadInfo, parallel int, all_task_count int) {
 		wg.Add(1)
 		go func(index int, range_begin, range_end int64) {
 			defer wg.Done()
-			fullfileanme := dir + "/" + filename + "." + strconv.FormatInt(range_begin, 10) + "-" + strconv.FormatInt(range_end, 10)
+			fullfileanme := tmpdir + "/" + filename + "." + strconv.FormatInt(range_begin, 10) + "-" + strconv.FormatInt(range_end, 10)
 			partfilename[index] = fullfileanme
 			err := downloadPart(index, info, range_begin, range_end, fullfileanme, task_info)
 			if err != nil {
-				fmt.Printf("下载分片%d失败: %v\n", index, err)
+				log.Log().Errorf("下载分片%d失败: %v\n", index, err)
 			} else {
-				fmt.Printf("分片%d下载完成。\n", index)
+				log.Log().Infof("分片%d下载完成。\n", index)
 			}
 		}(i, range_begin, range_end)
 	}
@@ -234,7 +239,6 @@ func downloadResource(info downloadInfo, parallel int, all_task_count int) {
 			fmt.Printf("\r%s        ", filename+": "+strconv.FormatFloat(Percent, 'f', 2, 64)+"% "+humanSize(int64(Speed))+" "+leftTime)
 		}
 		if finish >= parallel {
-			fmt.Println("finish")
 			break
 		} else {
 		}
@@ -245,9 +249,9 @@ func downloadResource(info downloadInfo, parallel int, all_task_count int) {
 	if !isError {
 		err = mergedFiles(partfilename, pwd+"/"+filename, crc64)
 		if err == nil {
-			defer os.RemoveAll(dir)
+			//os.RemoveAll(tmpdir)
 		} else {
-			fmt.Println("合并文件失败，err:", err)
+			log.Log().Error("合并文件失败，err:", err)
 		}
 	}
 }
@@ -324,12 +328,12 @@ func downloadPart(index int, info downloadInfo, range_begin int64, range_end int
 	task.Err = nil
 	task.Speed = 0
 	if filesize > (range_end - range_begin) {
-		fmt.Println(index, " 已经下载完成,filesize:", filesize, ",rangesize:", range_end-range_begin+1)
+		log.Log().Info(index, " 已经下载完成,filesize:", filesize, ",rangesize:", range_end-range_begin+1)
 		task.Percent = 100
 		p <- task
 		return nil
 	} else {
-		fmt.Println(index, " 继续下载,filesize:", filesize, ",rangesize:", range_end-range_begin+1)
+		log.Log().Info(index, " 继续下载,filesize:", filesize, ",rangesize:", range_end-range_begin+1)
 	}
 
 	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", filesize+range_begin, range_end))
