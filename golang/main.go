@@ -47,12 +47,12 @@ func main() {
 		noScreen = true
 	}
 
-	logfilename := os.Args[0] + ".log"
+	logfilename := "download.log"
 	log.Init(logfilename, 3)
 
 	positionalArgs := pflag.Args()
 	if len(positionalArgs) < 1 {
-		log.Log().Error("必须指定ef2文件名，", positionalArgs)
+		fmt.Println("必须指定ef2文件名，", positionalArgs)
 		os.Exit(1)
 	} else {
 		for _, ef2File := range positionalArgs {
