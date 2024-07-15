@@ -5,31 +5,27 @@ use clap::{App, Arg};
 use std::env;
 use std::process::Command;
 use std::convert::TryInto;
-use reqwest::header::{HeaderMap,HeaderValue,HeaderName,InvalidHeaderValue};
-use reqwest::blocking::{Client, ClientBuilder, Response};
+use reqwest::header::{HeaderMap,HeaderValue,HeaderName};
+use reqwest::blocking::{Client};
 use reqwest::Url;
 use std::error::Error as OtherError;
 use percent_encoding::{percent_decode_str};
 
-use std::sync::mpsc::{channel, Sender, Receiver};
+use std::sync::mpsc::{channel, Sender};
 
-use std::sync::{Arc, Barrier,RwLock};
 use std::thread;
 use std::time::{Instant,Duration, SystemTime, UNIX_EPOCH};
-use std::error::Error;
-use std::fmt;
-
 
 #[derive(Debug)]
 #[derive(Clone)]
 struct DownloadInfo {
-    Url: String,
-    Headers: HeaderMap,
+    url: String,
+    headers: HeaderMap,
 }
 
 impl DownloadInfo {
-    fn new(Url: String, Headers: HeaderMap) -> Self {
-        DownloadInfo { Url, Headers }
+    fn new(url: String, headers: HeaderMap) -> Self {
+        DownloadInfo { url: url, headers: headers }
     }
 }
 
@@ -43,7 +39,7 @@ fn download_ef2(ef2_filename: &str, parallel: usize) {
         }
     };
     let infos_len = infos.len();
-    let handles: Vec<_> = infos.into_iter().enumerate().map(|(i, info)| {
+    let handles: Vec<_> = infos.into_iter().enumerate().map(|(_i, info)| {
         thread::spawn(move || {
             if let Err(e) = download_resource(&info, parallel, infos_len) {
                 println!("Download resource error: {}", e);
@@ -51,49 +47,7 @@ fn download_ef2(ef2_filename: &str, parallel: usize) {
         })
     }).collect();
     for handle in handles {
-        handle.join().unwrap(); // 注意：如果子线程中发生panic，这里会重新panic
-    }
-}
-
-#[derive(Debug)]
-enum CustomError {
-    Io(io::Error),
-    InvalidHeaderValue(InvalidHeaderValue),
-    Other(Box<dyn OtherError>),
-    Other2(Box<dyn Error + Send + Sync + 'static>),
-}
-
-impl fmt::Display for CustomError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            CustomError::Io(err) => write!(f, "I/O error: {}", err),
-            CustomError::InvalidHeaderValue(err) => write!(f, "Invalid header value: {}", err),
-            CustomError::Other(e) => write!(f, "Other error: {}", e),
-            CustomError::Other2(e) => write!(f, "Other error: {}", e),
-        }
-    }
-}
-
-impl From<io::Error> for CustomError {
-    fn from(err: io::Error) -> Self {
-        CustomError::Io(err)
-    }
-}
-
-impl From<InvalidHeaderValue> for CustomError {
-    fn from(err: InvalidHeaderValue) -> Self {
-        CustomError::InvalidHeaderValue(err)
-    }
-}
-impl From<Box<dyn OtherError>> for CustomError {
-    fn from(e: Box<dyn OtherError>) -> Self {
-        CustomError::Other(e)
-    }
-}
-
-impl From<Box<dyn Error + Send + Sync + 'static>> for CustomError {
-    fn from(e: Box<dyn Error + Send + Sync + 'static>) -> Self {
-        CustomError::Other2(e)
+        handle.join().unwrap();
     }
 }
 
@@ -196,7 +150,7 @@ fn main() {
         )
         .get_matches();
 
-    let no_screen = matches.is_present("noscreen");
+    let mut no_screen = matches.is_present("noscreen");
     let parallel = matches.value_of("parallel").unwrap().parse::<u32>().unwrap();
     let ef2_files: Vec<String> = matches
         .values_of_os("ef2_files")
@@ -207,6 +161,9 @@ fn main() {
     if ef2_files.is_empty() {
         eprintln!("Must specify EF2 file names");
         std::process::exit(1);
+    }
+    if env::consts::OS == "windows"{
+        no_screen = true;
     }
 
     for ef2_file in ef2_files {
@@ -234,7 +191,7 @@ fn main() {
     }
 }
 
-fn download_resource(info: &DownloadInfo,mut parallel: usize, all_task_count: usize) -> Result<(),CustomError> {
+fn download_resource(info: &DownloadInfo,mut parallel: usize, all_task_count: usize) -> Result<(),Box<dyn std::error::Error>> {
     let (filename, filesize, crc64) = download_header(info)?;
     let filesize = filesize as u64;
     let file_info = fs::metadata(&filename).ok();
@@ -277,7 +234,10 @@ fn download_resource(info: &DownloadInfo,mut parallel: usize, all_task_count: us
         let info = info.clone();
         let tx = tx.clone();
         let handle = thread::spawn(move || {
-            let result = download_part(i, info, range_begin.try_into().unwrap(), range_end.try_into().unwrap(), &full_filename, tx);
+            match download_part(i, info, range_begin.try_into().unwrap(), range_end.try_into().unwrap(), &full_filename, tx){
+                Ok(())=>{},
+                Err(e)=>{eprintln!("下载分片{}失败：{}",i,e)}
+            }
         });
         handles.push(handle);
     }
@@ -331,20 +291,20 @@ fn download_resource(info: &DownloadInfo,mut parallel: usize, all_task_count: us
 }
 
 fn download_header(info: &DownloadInfo) -> Result<(String, i64, u64), Box<dyn OtherError>> {
-    let mut headers = info.Headers.iter().fold(HeaderMap::new(), |mut acc, (k, v)| {
+    let mut headers = info.headers.iter().fold(HeaderMap::new(), |mut acc, (k, v)| {
         acc.append(k.clone(), v.clone());
         acc
     });
     headers.insert("Range", HeaderValue::from_static("bytes=0-0"));
     let client = Client::new();
     let response = client
-        .get(&info.Url)
+        .get(&info.url)
         .headers(headers)
         .send()?;
 
     if !response.status().is_success() && response.status() != reqwest::StatusCode::PARTIAL_CONTENT {
-        println!("{}",info.Url);
-        return Err(format!("请求文件名文件大小等信息失败，状态码:{},url:{}", response.status(), info.Url).into());
+        println!("{}",info.url);
+        return Err(format!("请求文件名文件大小等信息失败，状态码:{},url:{}", response.status(), info.url).into());
     }
 
     let content_disposition = response.headers().get("content-disposition").and_then(|h| h.to_str().ok());
@@ -361,14 +321,14 @@ fn download_header(info: &DownloadInfo) -> Result<(String, i64, u64), Box<dyn Ot
                 "".into() // 返回空字符串的解码结果
             }
         } else {
-            let parsed_url = Url::parse(&info.Url)?;
+            let parsed_url = Url::parse(&info.url)?;
             let path_segment = parsed_url.path_segments().and_then(|segments| segments.last());
             percent_decode_str(path_segment.map_or("", |s| s))
                 .decode_utf8_lossy()
                 .into_owned()
         }
     } else {
-        let parsed_url = Url::parse(&info.Url)?;
+        let parsed_url = Url::parse(&info.url)?;
         let path_segment = parsed_url.path_segments().and_then(|segments| segments.last());
         percent_decode_str(path_segment.map_or("", |s| s))
             .decode_utf8_lossy()
@@ -449,9 +409,9 @@ fn download_part(
     }
 
     let client = Client::new();
-    let req = client.get(info.Url.trim())
+    let req = client.get(info.url.trim())
         .header("Range", format!("bytes={}-{}", filesize+range_begin, range_end))
-        .headers(info.Headers)
+        .headers(info.headers)
         .build()?;
 
     let mut resp = client.execute(req)?;
