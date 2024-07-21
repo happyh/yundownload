@@ -206,9 +206,9 @@ func downloadResource(info downloadInfo, parallel int, all_task_count int) {
 			partfilename[index] = fullfileanme
 			err := downloadPart(index, info, range_begin, range_end, fullfileanme, task_info)
 			if err != nil {
-				log.Log().Errorf("下载分片%d失败: %v\n", index, err)
+				log.Log().Errorf("%s 下载分片%d失败: %v\n", filename, index, err)
 			} else {
-				log.Log().Infof("分片%d下载完成。\n", index)
+				log.Log().Infof("%s 分片%d下载完成。\n", filename, index)
 			}
 		}(i, range_begin, range_end)
 	}
