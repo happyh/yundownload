@@ -249,7 +249,7 @@ func downloadResource(info downloadInfo, parallel int, all_task_count int) {
 	if !isError {
 		err = mergedFiles(partfilename, pwd+"/"+filename, crc64)
 		if err == nil {
-			//os.RemoveAll(tmpdir)
+			os.RemoveAll(tmpdir)
 		} else {
 			log.Log().Error("合并文件失败，err:", err)
 		}
