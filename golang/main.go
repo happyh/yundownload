@@ -38,8 +38,10 @@ func main() {
 	//使用cobra进行解析？
 	var noScreen bool
 	var parallel int
+	var cookie string
 	pflag.BoolVarP(&noScreen, "noscreen", "s", false, "是否关闭screen模式")
 	pflag.IntVarP(&parallel, "parallel", "p", 10, "并发的协程数")
+	pflag.StringVarP(&cookie, "cookie", "c", "", "cookie")
 	pflag.Parse()
 
 	switch runtime.GOOS {
@@ -52,7 +54,7 @@ func main() {
 
 	positionalArgs := pflag.Args()
 	if len(positionalArgs) < 1 {
-		fmt.Println("必须指定ef2文件名，", positionalArgs)
+		fmt.Println("必须指定ef2文件名或者url，", positionalArgs)
 		os.Exit(1)
 	} else {
 		for _, ef2File := range positionalArgs {
@@ -61,12 +63,16 @@ func main() {
 			// 根据noScreen的值执行不同的逻辑
 			if noScreen {
 				log.Log().Infof("当前目录：%s, 下载文件：%s \n", pwd, ef2File)
-				dowdownloadef2(ef2File, parallel)
+				dowdownloadef2(ef2File, parallel, cookie)
 			} else {
 				log.Log().Infof("当前目录：%s, 下载文件：%s 已经后台screen执行，可screen -r进入查看下载进度\n", pwd, ef2File)
 
-				// 构造要执行的命令
-				command := fmt.Sprintf("%s %s --noscreen -p %d", os.Args[0], ef2File, parallel)
+				command := ""
+				if cookie == "" {
+					command = fmt.Sprintf("%s %s --noscreen -p %d", os.Args[0], ef2File, parallel)
+				} else {
+					command = fmt.Sprintf("%s %s --noscreen -p %d -c %s", os.Args[0], ef2File, parallel, cookie)
+				}
 
 				// 使用screen执行命令
 				cmd := exec.Command("screen", "-dmS", "my_screen", "bash", "-c", command)
@@ -81,11 +87,17 @@ func main() {
 
 	}
 }
-func dowdownloadef2(ef2filename string, parallel int) {
+func dowdownloadef2(ef2filename string, parallel int, cookie string) {
 	infos, err := parseDownloadInfo(ef2filename)
 	if err != nil {
 		log.Log().Error("File parsing error:", err)
 		return
+	}
+
+	if cookie != "" {
+		for _, info := range infos {
+			info.Headers["Cookie"] = cookie
+		}
 	}
 
 	var wg sync.WaitGroup
@@ -366,7 +378,7 @@ func downloadPart(index int, info downloadInfo, range_begin int64, range_end int
 	reader := bufio.NewReaderSize(raw, buffer_size)
 	writer := bufio.NewWriter(file)
 	lasttime := time.Now().Unix()
-	time_interval := 1
+	time_interval := 10
 	last_receive := 0
 	written := 0
 	for {
@@ -380,6 +392,7 @@ func downloadPart(index int, info downloadInfo, range_begin int64, range_end int
 				if int(current_time-lasttime) > time_interval {
 					task.Percent = (written + int(filesize)) * 100 / int(resp.ContentLength+filesize)
 					task.Speed = last_receive / int(current_time-lasttime)
+					//fmt.Println(fullfilename, " speed ", task.Speed)
 					p <- task
 					lasttime = time.Now().Unix()
 					last_receive = 0

@@ -76,6 +76,7 @@ fn parse_download_info_single(lines_buffer: &[String], re_referer: &Regex, re_us
     Ok(Some(DownloadInfo::new(url, header_map)))
 }
 
+
 fn parse_download_info(file_path: &str) -> Result<Vec<DownloadInfo>, Box<dyn std::error::Error>> {
     let lower_file_path = file_path.to_lowercase();
     if lower_file_path.starts_with("http://") || lower_file_path.starts_with("https://") {
@@ -269,7 +270,8 @@ fn download_resource(info: &DownloadInfo,mut parallel: usize, all_task_count: us
             }
             let percent_avg = percent_sum as f64 / parallel as f64;
             let left_time = calculate_left_time(speed_sum, filesize.try_into().unwrap(), (percent_avg * filesize as f64 / 100.0) as i64);
-            println!("\r{}: {:.2}% {} {}", filename, percent_avg, human_size(speed_sum), left_time);
+            print!("\r{}: {:.2}% {} {}", filename, percent_avg, human_size(speed_sum), left_time);
+            io::stdout().flush().unwrap();
         }
     }
 
@@ -505,6 +507,20 @@ fn merged_files(files: Vec<String>, output_file: String, crc64: u64) -> io::Resu
     }
 
     Ok(())
+}
+
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_human_size(){
+        assert_eq!(2 + 2, 4);
+    }
+
+    #[test]
+    fn another() {
+        println!("Make this test fail");
+    }
 }
 
 /// 格式化文件大小
