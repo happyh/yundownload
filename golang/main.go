@@ -9,10 +9,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -36,128 +34,62 @@ type Task struct {
 
 func main() {
 	//使用cobra进行解析？
-	var noScreen bool
 	var parallel int
 	var cookie string
-	pflag.BoolVarP(&noScreen, "noscreen", "s", false, "是否关闭screen模式")
+	var outputfilename string
+	var referer string
 	pflag.IntVarP(&parallel, "parallel", "p", 10, "并发的协程数")
 	pflag.StringVarP(&cookie, "cookie", "c", "", "cookie")
+	pflag.StringVarP(&outputfilename, "out", "o", "", "保存文件名")
+	pflag.StringVarP(&referer, "referer", "r", "", "referer")
 	pflag.Parse()
 
-	switch runtime.GOOS {
-	case "windows":
-		noScreen = true
-	}
-
-	logfilename := "download.log"
+	pid := os.Getpid()
+	logfilename := "download_" + strconv.Itoa(pid) + ".log"
 	log.Init(logfilename, 3)
 
 	positionalArgs := pflag.Args()
 	if len(positionalArgs) < 1 {
-		fmt.Println("必须指定ef2文件名或者url，", positionalArgs)
+		fmt.Println("必须指定下载url，", positionalArgs)
 		os.Exit(1)
 	} else {
-		for _, ef2File := range positionalArgs {
-
-			pwd, _ := os.Getwd()
-			// 根据noScreen的值执行不同的逻辑
-			if noScreen {
-				log.Log().Infof("当前目录：%s, 下载文件：%s \n", pwd, ef2File)
-				dowdownloadef2(ef2File, parallel, cookie)
-			} else {
-				log.Log().Infof("当前目录：%s, 下载文件：%s 已经后台screen执行，可screen -r进入查看下载进度\n", pwd, ef2File)
-
-				command := ""
-				if cookie == "" {
-					command = fmt.Sprintf("%s %s --noscreen -p %d", os.Args[0], ef2File, parallel)
-				} else {
-					command = fmt.Sprintf("%s %s --noscreen -p %d -c %s", os.Args[0], ef2File, parallel, cookie)
-				}
-
-				// 使用screen执行命令
-				cmd := exec.Command("screen", "-dmS", "my_screen", "bash", "-c", command)
-				if err := cmd.Start(); err != nil {
-					log.Log().Error("执行screen命令时出错:", err)
-					os.Exit(1)
-				} else {
-					log.Log().Info("执行screen命令是:", cmd)
-				}
-			}
+		pwd, _ := os.Getwd()
+		for _, url := range positionalArgs {
+			log.Log().Infof("当前目录：%s, 下载文件：%s \n", pwd, url)
+			dowdownloadTask(url, parallel, cookie, referer, outputfilename)
 		}
 
 	}
 }
-func dowdownloadef2(ef2filename string, parallel int, cookie string) {
-	infos, err := parseDownloadInfo(ef2filename)
-	if err != nil {
-		log.Log().Error("File parsing error:", err)
-		return
-	}
-
-	if cookie != "" {
-		for _, info := range infos {
-			info.Headers["Cookie"] = cookie
-		}
-	}
-
-	var wg sync.WaitGroup
-	for i, info := range infos {
-		wg.Add(1)
-		go func(i int, info downloadInfo) {
-			defer wg.Done()
-
-			downloadResource(info, parallel, len(infos))
-		}(i, *info)
-		time.Sleep(2 * time.Second)
-	}
-	wg.Wait()
-}
-
-func parseDownloadInfo(filePath string) ([]*downloadInfo, error) {
-	var infos []*downloadInfo
-
+func dowdownloadTask(url string, parallel int, cookie, referer, outputfilename string) {
 	// Check if the filePath is a URL.
-	lowerFilePath := strings.ToLower(filePath)
-	if strings.HasPrefix(lowerFilePath, "http://") || strings.HasPrefix(lowerFilePath, "https://") {
-		info := &downloadInfo{
-			Url:     strings.TrimSpace(filePath),
+	lowerurl := strings.ToLower(url)
+	if strings.HasPrefix(lowerurl, "http://") || strings.HasPrefix(lowerurl, "https://") {
+		info := downloadInfo{
+			Url:     strings.TrimSpace(url),
 			Headers: map[string]string{"User-Agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/53.0.2763.0 Safari/537.36"},
 		}
-		infos = append(infos, info)
-		return infos, nil
-	}
 
-	contentBytes, err := os.ReadFile(filePath)
-	if err != nil {
-		return nil, err
-	}
-
-	content := string(contentBytes)
-
-	regexPattern := `<\r?\n(.*?)\r?\nreferer: (.*?)\r?\nuser-agent: (.*?)\r?\n>`
-	compiledRegex := regexp.MustCompile(`(?i)` + regexPattern)
-
-	matches := compiledRegex.FindAllStringSubmatch(content, -1)
-
-	for _, match := range matches {
-		info := &downloadInfo{
-			Url: strings.TrimSpace(match[1]),
-			Headers: map[string]string{
-				"referer":    strings.TrimSpace(match[2]),
-				"User-Agent": strings.TrimSpace(match[3]),
-			},
+		if cookie != "" {
+			info.Headers["Cookie"] = cookie
 		}
-		infos = append(infos, info)
-	}
+		if referer != "" {
+			info.Headers["Referer"] = referer
+		}
 
-	return infos, nil
+		downloadResource(info, parallel, outputfilename)
+	}
 }
 
-func downloadResource(info downloadInfo, parallel int, all_task_count int) {
+func downloadResource(info downloadInfo, parallel int, outfilename string) {
 	filename, filesize, crc64, err := downloadHeader(info)
 	if err != nil {
 		log.Log().Error("获取文件头信息失败:", err)
 		return
+	}
+
+	if outfilename != "" {
+		filename = outfilename
 	}
 
 	fileInfo, err := os.Stat(filename)
@@ -225,7 +157,7 @@ func downloadResource(info downloadInfo, parallel int, all_task_count int) {
 		}(i, range_begin, range_end)
 	}
 
-	tick := time.Tick(time.Duration(all_task_count*2) * time.Second)
+	tick := time.Tick(time.Duration(2) * time.Second)
 	arTasks := make([]Task, parallel)
 	isError := false
 	for {
