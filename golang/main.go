@@ -9,8 +9,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -38,11 +40,18 @@ func main() {
 	var cookie string
 	var outputfilename string
 	var referer string
+	var noScreen bool
 	pflag.IntVarP(&parallel, "parallel", "p", 10, "并发的协程数")
 	pflag.StringVarP(&cookie, "cookie", "c", "", "cookie")
 	pflag.StringVarP(&outputfilename, "out", "o", "", "保存文件名")
 	pflag.StringVarP(&referer, "referer", "r", "", "referer")
+	pflag.BoolVarP(&noScreen, "noscreen", "s", false, "是否关闭screen模式")
 	pflag.Parse()
+
+	switch runtime.GOOS {
+	case "windows":
+		noScreen = true
+	}
 
 	pid := os.Getpid()
 	logfilename := "download_" + strconv.Itoa(pid) + ".log"
@@ -55,10 +64,31 @@ func main() {
 	} else {
 		pwd, _ := os.Getwd()
 		for _, url := range positionalArgs {
-			log.Log().Infof("当前目录：%s, 下载文件：%s \n", pwd, url)
-			dowdownloadTask(url, parallel, cookie, referer, outputfilename)
-		}
+			if noScreen {
+				log.Log().Infof("当前目录：%s, 下载url：%s \n", pwd, url)
+				dowdownloadTask(url, parallel, cookie, referer, outputfilename)
+			} else {
+				log.Log().Infof("当前目录：%s, 下载文件：%s 已经后台screen执行，可screen -r进入查看下载进度\n", pwd, url)
 
+				// 构造要执行的命令
+				command := fmt.Sprintf("%s '%s' --noscreen -p %d", os.Args[0], url, parallel)
+				if referer != "" {
+					command = command + " -r " + referer
+				}
+				if cookie != "" {
+					command = command + " -c '" + cookie + "'"
+				}
+
+				// 使用screen执行命令
+				cmd := exec.Command("screen", "-dmS", "my_screen", "bash", "-c", command)
+				if err := cmd.Start(); err != nil {
+					log.Log().Error("执行screen命令时出错:", err)
+					os.Exit(1)
+				} else {
+					log.Log().Info("执行screen命令是:", cmd)
+				}
+			}
+		}
 	}
 }
 func dowdownloadTask(url string, parallel int, cookie, referer, outputfilename string) {

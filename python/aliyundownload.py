@@ -130,30 +130,18 @@ def main(ef2_file):
             ef2_content = file.read()  
             urls_with_headers = extract_urls_and_headers(ef2_content)
 
-            # 创建一个线程池执行器，可以根据需要调整max_workers的数量
-            with concurrent.futures.ThreadPoolExecutor(max_workers=len(urls_with_headers)) as executor:
-                # 使用executor.submit提交任务到线程池
-                futures = [executor.submit(download_file_with_resume, url, headers, ".", "")
-                           for url, headers in urls_with_headers]
+            for url, headers in urls_with_headers:
 
-                #等待所有任务完成
-                concurrent.futures.wait(futures)
-
-                for future in concurrent.futures.as_completed(futures):
-                    try:
-                        result = future.result()  # 处理返回结果，如果有的话
-                        print(f"下载文件结果: {result}")
-                    except Exception as e:
-                        print(f"下载文件时发生错误: {e}")
     except FileNotFoundError:  
         print(f"文件 {ef2_file} 未找到。")  
     except Exception as e:  
         print(f"发生错误: {e}")  
   
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='从 ef2 文件中解析下载地址并使用 curl 下载。')  
+    parser = argparse.ArgumentParser(description='从 ef2 文件中解析下载地址并使用 download 下载。')  
     parser.add_argument('ef2_file', type=str, help='ef2 格式文件的名称')
-    parser.add_argument('-s', '--noscreen',action='store_true', help='是否关闭screen模式',default=False)
+    parser.add_argument('-c', '--cookie', type=str,help='cookie',default="")
+
     args = parser.parse_args()
 
     if args.noscreen:
