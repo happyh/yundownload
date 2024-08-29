@@ -269,7 +269,7 @@ fn download_resource(info: &DownloadInfo,mut parallel: usize, all_task_count: us
             }
             let percent_avg = percent_sum as f64 / parallel as f64;
             let left_time = calculate_left_time(speed_sum, filesize.try_into().unwrap(), (percent_avg * filesize as f64 / 100.0) as i64);
-            println!("\r{}: {:.2}% {} {}", filename, percent_avg, human_size(speed_sum), left_time);
+            print!("\r{}: {:.2}% {} {}", filename, percent_avg, human_size(speed_sum), left_time);
         }
     }
 
