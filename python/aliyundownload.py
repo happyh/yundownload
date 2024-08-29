@@ -16,24 +16,7 @@ import re
 import subprocess
 import requests
 import os
-
-def extract_urls_and_headers(ef2_content):  
-    urls_with_headers = []  
-    pattern = re.compile(r'<\n(https?://.*?)\n(.*?)\n>', re.DOTALL)  
-    matches = pattern.findall(ef2_content)  
-      
-    for url, headers_raw in matches:  
-        headers = {}  
-        for line in headers_raw.strip().split('\n'):  
-            key, value = line.split(': ', 1)  
-            headers[key.lower()] = value  
-        urls_with_headers.append((url, headers))  
-      
-    return urls_with_headers
-
-
 from urllib.parse import unquote, urlparse
-
 
 def download_file_with_resume(url, headers,save_dir,savefilename):
     savefullfilename = os.path.join(save_dir, savefilename)
@@ -124,6 +107,20 @@ def sanitize_filename(filename):
         filename = filename.replace(char, '_')
     return filename
 
+def extract_urls_and_headers(ef2_content):  
+    urls_with_headers = []  
+    pattern = re.compile(r'<\n(https?://.*?)\n(.*?)\n>', re.DOTALL)  
+    matches = pattern.findall(ef2_content)  
+      
+    for url, headers_raw in matches:  
+        headers = {}  
+        for line in headers_raw.strip().split('\n'):  
+            key, value = line.split(': ', 1)  
+            headers[key.lower()] = value  
+        urls_with_headers.append((url, headers))  
+      
+    return urls_with_headers
+
 def main(ef2_file):  
     try:  
         with open(ef2_file, 'r') as file:  
@@ -131,7 +128,8 @@ def main(ef2_file):
             urls_with_headers = extract_urls_and_headers(ef2_content)
 
             for url, headers in urls_with_headers:
-
+                command ="download " + url + " --noscreen " + " -r https://www.aliyundrive.com/"
+                subprocess.Popen(["screen", "-dmS", "my_screen", "bash", "-c", command])
     except FileNotFoundError:  
         print(f"文件 {ef2_file} 未找到。")  
     except Exception as e:  
@@ -143,10 +141,4 @@ if __name__ == "__main__":
     parser.add_argument('-c', '--cookie', type=str,help='cookie',default="")
 
     args = parser.parse_args()
-
-    if args.noscreen:
-        main(args.ef2_file)
-    else:
-        print("当前目录：",os.getcwd(), ",下载文件：",args.ef2_file,"已经后台screen执行，可screen -r进入查看下载进度")
-        command = sys.argv[0] + " " + args.ef2_file + " --noscreen"
-        subprocess.Popen(["screen", "-dmS", "my_screen", "bash", "-c", command])
+    main(args.ef2_file)

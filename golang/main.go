@@ -55,7 +55,7 @@ func main() {
 
 	pid := os.Getpid()
 	logfilename := "download_" + strconv.Itoa(pid) + ".log"
-	log.Init(logfilename, 3)
+	log.Init(logfilename, 6)
 
 	positionalArgs := pflag.Args()
 	if len(positionalArgs) < 1 {
@@ -73,10 +73,13 @@ func main() {
 				// 构造要执行的命令
 				command := fmt.Sprintf("%s '%s' --noscreen -p %d", os.Args[0], url, parallel)
 				if referer != "" {
-					command = command + " -r " + referer
+					command = command + " -r '" + referer + "'"
 				}
 				if cookie != "" {
 					command = command + " -c '" + cookie + "'"
+				}
+				if outputfilename != "" {
+					command = command + " -o '" + outputfilename + "'"
 				}
 
 				// 使用screen执行命令
