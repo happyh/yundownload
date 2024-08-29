@@ -128,7 +128,8 @@ def main(ef2_file):
             urls_with_headers = extract_urls_and_headers(ef2_content)
 
             for url, headers in urls_with_headers:
-                command ="download " + url + " --noscreen " + " -r https://www.aliyundrive.com/"
+                command ="download '" + url + "' --noscreen " + " -r https://www.aliyundrive.com/"
+                #print(command)
                 subprocess.Popen(["screen", "-dmS", "my_screen", "bash", "-c", command])
     except FileNotFoundError:  
         print(f"文件 {ef2_file} 未找到。")  
