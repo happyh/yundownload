@@ -127,9 +127,9 @@ def main(ef2_file):
             ef2_content = file.read()  
             urls_with_headers = extract_urls_and_headers(ef2_content)
 
-            command ="download "  + "--noscreen " + "-r https://www.aliyundrive.com/"
+            command ="--noscreen " + "-r https://www.aliyundrive.com/"
             for url, headers in urls_with_headers:
-                command +=  " '" + url + "'"
+                command +=  " " + url 
             
             with open("tasks", "w") as f:
                 f.write(f"{command}")

@@ -118,6 +118,7 @@ func readFirstLine(filename string) (string, error) {
 	// 打开文件
 	file, err := os.Open(filename)
 	if err != nil {
+		log.Log().Infof("打开文件：%s 失败", filename)
 		return "", err
 	}
 	defer file.Close()
@@ -134,6 +135,8 @@ func readFirstLine(filename string) (string, error) {
 	if err := scanner.Err(); err != nil {
 		return "", err
 	}
+	
+	log.Log().Infof("文件：%s 为空", filename)
 
 	// 文件为空的情况
 	return "", fmt.Errorf("file is empty")
