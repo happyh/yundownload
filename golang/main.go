@@ -9,8 +9,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -32,6 +34,8 @@ type Task struct {
 	Err     error
 }
 
+var progressTick = 2 //每个任务2秒刷新一次显示进度
+
 func main() {
 	//使用cobra进行解析？
 	var parallel int
@@ -39,22 +43,28 @@ func main() {
 	var outputfilename string
 	var referer string
 	var taskfile string
+	var noScreen bool
 	pflag.IntVarP(&parallel, "parallel", "p", 10, "并发的协程数")
 	pflag.StringVarP(&cookie, "cookie", "c", "", "cookie")
 	pflag.StringVarP(&outputfilename, "out", "o", "", "保存文件名")
 	pflag.StringVarP(&referer, "referer", "r", "", "referer")
+	pflag.BoolVarP(&noScreen, "noscreen", "s", false, "是否关闭screen模式")
 	pflag.StringVarP(&taskfile, "taskfile", "", "", "下载任务文件")
 
 	pflag.Parse()
 	if taskfile != "" {
-
-		commands := strings.Split(taskfile, " ")
+		commandcotent, _ := readFirstLine(taskfile)
+		commands := strings.Split(commandcotent, " ")
 		pflag.ParseContent(commands)
 	}
 
-	pid := os.Getpid()
-	logfilename := "download_" + strconv.Itoa(pid) + ".log"
-	log.Init(logfilename, 3)
+	switch runtime.GOOS {
+	case "windows":
+		noScreen = true
+	}
+
+	logfilename := "download.log"
+	log.Init(logfilename, 6)
 
 	positionalArgs := pflag.Args()
 	if len(positionalArgs) < 1 {
@@ -62,13 +72,73 @@ func main() {
 		os.Exit(1)
 	} else {
 		pwd, _ := os.Getwd()
-		for _, url := range positionalArgs {
-			log.Log().Infof("当前目录：%s, 下载文件：%s \n", pwd, url)
-			dowdownloadTask(url, parallel, cookie, referer, outputfilename)
-		}
+		if noScreen {
+			var wg sync.WaitGroup
+			progressTick = 2 * len(positionalArgs)
+			for _, url := range positionalArgs {
+				wg.Add(1)
+				log.Log().Infof("下载url：%s \n", url)
+				go func(url string) {
+					defer wg.Done()
+					dowdownloadTask(url, parallel, cookie, referer, outputfilename)
+				}(url)
+				time.Sleep(2 * time.Second)
+			}
+			wg.Wait()
+		} else {
+			for _, url := range positionalArgs {
+				log.Log().Infof("当前目录：%s, 下载文件：%s 已经后台screen执行，可screen -r进入查看下载进度\n", pwd, url)
 
+				// 构造要执行的命令
+				command := fmt.Sprintf("%s '%s' --noscreen -p %d", os.Args[0], url, parallel)
+				if referer != "" {
+					command = command + " -r '" + referer + "'"
+				}
+				if cookie != "" {
+					command = command + " -c '" + cookie + "'"
+				}
+				if outputfilename != "" {
+					command = command + " -o '" + outputfilename + "'"
+				}
+
+				// 使用screen执行命令
+				cmd := exec.Command("screen", "-dmS", "my_screen", "bash", "-c", command)
+				if err := cmd.Start(); err != nil {
+					log.Log().Error("执行screen命令时出错:", err)
+					os.Exit(1)
+				} else {
+					log.Log().Info("执行screen命令是:", cmd)
+				}
+			}
+		}
 	}
 }
+
+func readFirstLine(filename string) (string, error) {
+	// 打开文件
+	file, err := os.Open(filename)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	// 创建一个新的扫描器
+	scanner := bufio.NewScanner(file)
+
+	// 读取第一行
+	if scanner.Scan() {
+		return scanner.Text(), nil
+	}
+
+	// 检查是否有错误
+	if err := scanner.Err(); err != nil {
+		return "", err
+	}
+
+	// 文件为空的情况
+	return "", fmt.Errorf("file is empty")
+}
+
 func dowdownloadTask(url string, parallel int, cookie, referer, outputfilename string) {
 	// Check if the filePath is a URL.
 	lowerurl := strings.ToLower(url)
@@ -165,7 +235,7 @@ func downloadResource(info downloadInfo, parallel int, outfilename string) {
 		}(i, range_begin, range_end)
 	}
 
-	tick := time.Tick(time.Duration(2) * time.Second)
+	tick := time.Tick(time.Duration(progressTick) * time.Second)
 	arTasks := make([]Task, parallel)
 	isError := false
 	for {
