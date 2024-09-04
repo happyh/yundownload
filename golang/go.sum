@@ -1,6 +1,10 @@
 github.com/happyh/go-logging v0.0.0-20180530061813-2fefb47f27db h1:POt4cnHJTPF3Hcz2hoGRhTv/eVA8kkBMD7l9LImS6Lg=
 github.com/happyh/go-logging v0.0.0-20180530061813-2fefb47f27db/go.mod h1:XZ4psG5dU/tCAawrBvt0CjsZe4sq7142/hBjvz3rLTg=
+github.com/happyh/pflag v1.0.7 h1:8JMontjML0RwGRBPHm9uSxNNaciEfx2O7e5Uy5h6z0U=
+github.com/happyh/pflag v1.0.7/go.mod h1:WuXPryRb7P3HHw0bbTEnEKqYpygQlxl5gS9xikzudcs=
+github.com/happyh/pflag v1.0.8 h1:wm/OK9L5xTdNzoEq6O7axvq8C7+U6Ph0vmsiiFA8/KU=
+github.com/happyh/pflag v1.0.8/go.mod h1:WuXPryRb7P3HHw0bbTEnEKqYpygQlxl5gS9xikzudcs=
+github.com/happyh/pflag v1.0.9 h1:OTlDHCHrZ6krjYqmY/a26/KI+V95F5fEZ2Qen2F+KNU=
+github.com/happyh/pflag v1.0.9/go.mod h1:WuXPryRb7P3HHw0bbTEnEKqYpygQlxl5gS9xikzudcs=
 github.com/nightlyone/lockfile v1.0.0 h1:RHep2cFKK4PonZJDdEl4GmkabuhbsRMgk/k3uAmxBiA=
 github.com/nightlyone/lockfile v1.0.0/go.mod h1:rywoIealpdNse2r832aiD9jRk8ErCatROs6LzC841CI=
-github.com/spf13/pflag v1.0.5 h1:iy+VFUOCP1a+8yFto/drg2CJ5u0yRoB7fZw3DKv/JXA=
-github.com/spf13/pflag v1.0.5/go.mod h1:McXfInJRrz4CZXVZOBLb0bTZqETkiAhM9Iw0y3An2Bg=

@@ -17,8 +17,8 @@ import (
 	"time"
 
 	log "github.com/happyh/go-logging"
+	"github.com/happyh/pflag"
 	"github.com/nightlyone/lockfile"
-	"github.com/spf13/pflag"
 )
 
 type downloadInfo struct {
@@ -38,11 +38,19 @@ func main() {
 	var cookie string
 	var outputfilename string
 	var referer string
+	var taskfile string
 	pflag.IntVarP(&parallel, "parallel", "p", 10, "并发的协程数")
 	pflag.StringVarP(&cookie, "cookie", "c", "", "cookie")
 	pflag.StringVarP(&outputfilename, "out", "o", "", "保存文件名")
 	pflag.StringVarP(&referer, "referer", "r", "", "referer")
+	pflag.StringVarP(&taskfile, "taskfile", "", "", "下载任务文件")
+
 	pflag.Parse()
+	if taskfile != "" {
+
+		commands := strings.Split(taskfile, " ")
+		pflag.ParseContent(commands)
+	}
 
 	pid := os.Getpid()
 	logfilename := "download_" + strconv.Itoa(pid) + ".log"
