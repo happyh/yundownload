@@ -52,18 +52,20 @@ func main() {
 	pflag.StringVarP(&taskfile, "taskfile", "", "", "下载任务文件")
 
 	pflag.Parse()
-	if taskfile != "" {
-		commandcotent, _ := readFirstLine(taskfile)
-		commands := strings.Split(commandcotent, " ")
-		pflag.ParseContent(commands)
-	}
 
 	switch runtime.GOOS {
 	case "windows":
 		noScreen = true
 	}
 
-	logfilename := "download.log"
+	if noScreen && taskfile != "" {
+		commandcotent, _ := readFirstLine(taskfile)
+		commands := strings.Split(commandcotent, " ")
+		pflag.ParseContent(commands)
+		noScreen = true
+	}
+
+	logfilename := os.Args[0] + ".log"
 	log.Init(logfilename, 6)
 
 	positionalArgs := pflag.Args()
@@ -100,6 +102,9 @@ func main() {
 				if outputfilename != "" {
 					command = command + " -o '" + outputfilename + "'"
 				}
+				if taskfile != "" {
+					command = command + " -t '" + taskfile + "'"
+				}
 
 				// 使用screen执行命令
 				cmd := exec.Command("screen", "-dmS", "my_screen", "bash", "-c", command)
@@ -135,7 +140,7 @@ func readFirstLine(filename string) (string, error) {
 	if err := scanner.Err(); err != nil {
 		return "", err
 	}
-	
+
 	log.Log().Infof("文件：%s 为空", filename)
 
 	// 文件为空的情况
