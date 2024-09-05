@@ -49,7 +49,7 @@ func main() {
 	pflag.StringVarP(&outputfilename, "out", "o", "", "保存文件名")
 	pflag.StringVarP(&referer, "referer", "r", "", "referer")
 	pflag.BoolVarP(&noScreen, "noscreen", "s", false, "是否关闭screen模式")
-	pflag.StringVarP(&taskfile, "taskfile", "", "", "下载任务文件")
+	pflag.StringVarP(&taskfile, "taskfile", "t", "", "下载任务文件")
 
 	pflag.Parse()
 
@@ -69,52 +69,48 @@ func main() {
 	log.Init(logfilename, 6)
 
 	positionalArgs := pflag.Args()
-	if len(positionalArgs) < 1 {
-		fmt.Println("必须指定下载url，", positionalArgs)
-		os.Exit(1)
+	if noScreen {
+		var wg sync.WaitGroup
+		progressTick = 2 * len(positionalArgs)
+		for _, url := range positionalArgs {
+			wg.Add(1)
+			log.Log().Infof("下载url：%s \n", url)
+			go func(url string) {
+				defer wg.Done()
+				dowdownloadTask(url, parallel, cookie, referer, outputfilename)
+			}(url)
+			time.Sleep(2 * time.Second)
+		}
+		wg.Wait()
 	} else {
+		// 构造要执行的命令
+		command := fmt.Sprintf("%s --noscreen -p %d", os.Args[0], parallel)
+		if referer != "" {
+			command = command + " -r '" + referer + "'"
+		}
+		if cookie != "" {
+			command = command + " -c '" + cookie + "'"
+		}
+		if outputfilename != "" {
+			command = command + " -o '" + outputfilename + "'"
+		}
+		if taskfile != "" {
+			command = command + " -t '" + taskfile + "'"
+		}
+
+		for _, url := range positionalArgs {
+			command = command + " '" + url + "'"
+		}
 		pwd, _ := os.Getwd()
-		if noScreen {
-			var wg sync.WaitGroup
-			progressTick = 2 * len(positionalArgs)
-			for _, url := range positionalArgs {
-				wg.Add(1)
-				log.Log().Infof("下载url：%s \n", url)
-				go func(url string) {
-					defer wg.Done()
-					dowdownloadTask(url, parallel, cookie, referer, outputfilename)
-				}(url)
-				time.Sleep(2 * time.Second)
-			}
-			wg.Wait()
+		log.Log().Infof("当前目录：%s, screen 后台执行任务%s\n", pwd, command)
+
+		// 使用screen执行命令
+		cmd := exec.Command("screen", "-dmS", "my_screen", "bash", "-c", command)
+		if err := cmd.Start(); err != nil {
+			log.Log().Error("执行screen命令时出错:", err)
+			os.Exit(1)
 		} else {
-			for _, url := range positionalArgs {
-				log.Log().Infof("当前目录：%s, 下载文件：%s 已经后台screen执行，可screen -r进入查看下载进度\n", pwd, url)
-
-				// 构造要执行的命令
-				command := fmt.Sprintf("%s '%s' --noscreen -p %d", os.Args[0], url, parallel)
-				if referer != "" {
-					command = command + " -r '" + referer + "'"
-				}
-				if cookie != "" {
-					command = command + " -c '" + cookie + "'"
-				}
-				if outputfilename != "" {
-					command = command + " -o '" + outputfilename + "'"
-				}
-				if taskfile != "" {
-					command = command + " -t '" + taskfile + "'"
-				}
-
-				// 使用screen执行命令
-				cmd := exec.Command("screen", "-dmS", "my_screen", "bash", "-c", command)
-				if err := cmd.Start(); err != nil {
-					log.Log().Error("执行screen命令时出错:", err)
-					os.Exit(1)
-				} else {
-					log.Log().Info("执行screen命令是:", cmd)
-				}
-			}
+			log.Log().Info("执行screen命令是:", cmd)
 		}
 	}
 }
