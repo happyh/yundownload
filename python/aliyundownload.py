@@ -136,7 +136,8 @@ def main(ef2_file):
 
             command = "download --taskfile tasks"
             #print(command)
-            subprocess.Popen(["screen", "-dmS", "my_screen", "bash", "-c", command])
+            #subprocess.Popen(["screen", "-dmS", "screen_download_from_pyton", "bash", "-c", command])
+            subprocess.Popen(["bash", "-c", command])
     except FileNotFoundError:  
         print(f"文件 {ef2_file} 未找到。")  
     except Exception as e:  
