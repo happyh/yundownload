@@ -47,9 +47,9 @@ func main() {
 	pflag.IntVarP(&parallel, "parallel", "p", 10, "并发的协程数")
 	pflag.StringVarP(&cookie, "cookie", "c", "", "cookie")
 	pflag.StringVarP(&outputfilename, "out", "o", "", "保存文件名")
-	pflag.StringVarP(&referer, "referer", "r", "", "referer")
-	pflag.BoolVarP(&noScreen, "noscreen", "s", false, "是否关闭screen模式")
-	pflag.StringVarP(&taskfile, "taskfile", "t", "", "下载任务文件")
+	pflag.StringVarP(&referer, "referer", "r", "", "referer 地址")
+	pflag.BoolVarP(&noScreen, "noscreen", "s", false, "是否关闭screen模式，默认是screen模式")
+	pflag.StringVarP(&taskfile, "taskfile", "t", "", "下载任务文件，如果指定则将任务文件的第一行读取解析为参数，目的是为了避免在命令行显示下载的url")
 
 	pflag.Parse()
 
