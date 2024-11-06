@@ -49,7 +49,7 @@ func main() {
 	pflag.StringVarP(&outputfilename, "out", "o", "", "保存文件名")
 	pflag.StringVarP(&referer, "referer", "r", "", "referer 地址")
 	pflag.BoolVarP(&noScreen, "noscreen", "s", false, "是否关闭screen模式，默认是screen模式")
-	pflag.StringVarP(&taskfile, "taskfile", "t", "", "下载任务文件，如果指定则将任务文件的第一行读取解析为参数，目的是为了避免在命令行显示下载的url")
+	pflag.StringVarP(&taskfile, "taskfile", "t", "", "下载参数文件，如果指定则将文件的第一行读取解析为参数，目的是为了避免在命令行显示下载的url")
 
 	pflag.Parse()
 
@@ -114,33 +114,29 @@ func main() {
 		}
 	}
 }
-
 func readFirstLine(filename string) (string, error) {
-	// 打开文件
 	file, err := os.Open(filename)
 	if err != nil {
-		log.Log().Infof("打开文件：%s 失败", filename)
+		log.Log().Infof("打开文件：%s 失败: %v", filename, err)
 		return "", err
 	}
 	defer file.Close()
 
-	// 创建一个新的扫描器
-	scanner := bufio.NewScanner(file)
-
-	// 读取第一行
-	if scanner.Scan() {
-		return scanner.Text(), nil
-	}
-
-	// 检查是否有错误
-	if err := scanner.Err(); err != nil {
+	reader := bufio.NewReader(file)
+	line, err := reader.ReadString('\n')
+	if err != nil && err != io.EOF {
+		log.Log().Infof("读取文件：%s 失败: %v", filename, err)
 		return "", err
 	}
 
-	log.Log().Infof("文件：%s 为空", filename)
+	// 去除行尾的换行符和空白字符
+	line = strings.TrimSpace(line)
+	if line == "" {
+		log.Log().Infof("文件：%s 为空", filename)
+		return "", fmt.Errorf("file is empty")
+	}
 
-	// 文件为空的情况
-	return "", fmt.Errorf("file is empty")
+	return line, nil
 }
 
 func dowdownloadTask(url string, parallel int, cookie, referer, outputfilename string) {
