@@ -127,7 +127,11 @@ def main(ef2_file):
             ef2_content = file.read()  
             urls_with_headers = extract_urls_and_headers(ef2_content)
 
-            command ="--noscreen " + "-r https://www.aliyundrive.com/"
+            if len(urls_with_headers) == 0:
+                print(f"从{ef2_file}获取URL地址失败！")
+                return	  
+	
+            command ="--noscreen " + "-r https://www.alipan.com/"
             for url, headers in urls_with_headers:
                 command +=  " " + url 
             
